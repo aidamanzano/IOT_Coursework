@@ -1,37 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Sep 18 23:18:24 2020
+Created on Fri Jan  8 01:27:26 2021
 
 @author: aida
 """
 
-# import the necessary packages
+
 import numpy as np
+import argparse
 import time
 import cv2
 import os
+
 from flask import Flask, request, Response, jsonify
 import jsonpickle
-#import binascii
-import io as StringIO
 import base64
-from io import BytesIO
-import io
 import json
 from PIL import Image
 
-# construct the argument parse and parse the arguments
-
-confthres = 0.3
-nmsthres = 0.1
-yolo_path = './'
+confthres=0.25
+nmsthres=0.1
+path="/home/aida/darknet/"
 
 def get_labels(labels_path):
     # load the COCO class labels our YOLO model was trained on
     #labelsPath = os.path.sep.join([yolo_path, "yolo_v3/coco.names"])
-    lpath=os.path.sep.join([yolo_path, labels_path])
-    LABELS = open(lpath).read().strip().split("\n")
+    LABELS = open(labels_path).read().strip().split("\n")
     return LABELS
 
 def get_colors(LABELS):
@@ -40,28 +35,12 @@ def get_colors(LABELS):
     COLORS = np.random.randint(0, 255, size=(len(LABELS), 3),dtype="uint8")
     return COLORS
 
-def get_weights(weights_path):
-    # derive the paths to the YOLO weights and model configuration
-    weightsPath = os.path.sep.join([yolo_path, weights_path])
-    return weightsPath
-
-def get_config(config_path):
-    configPath = os.path.sep.join([yolo_path, config_path])
-    return configPath
 
 def load_model(configpath,weightspath):
     # load our YOLO object detector trained on COCO dataset (80 classes)
     print("[INFO] loading YOLO from disk...")
     net = cv2.dnn.readNetFromDarknet(configpath, weightspath)
     return net
-
-
-def image_to_byte_array(image:Image):
-  imgByteArr = io.BytesIO()
-  image.save(imgByteArr, format='PNG')
-  imgByteArr = imgByteArr.getvalue()
-  return imgByteArr
-
 
 def get_predection(image,net,LABELS,COLORS):
     (H, W) = image.shape[:2]
@@ -135,56 +114,72 @@ def get_predection(image,net,LABELS,COLORS):
             # extract the bounding box coordinates
             (x, y) = (boxes[i][0], boxes[i][1])
             (w, h) = (boxes[i][2], boxes[i][3])
-            print('DEBUGGING', COLORS[classIDs[i]])
 
             # draw a bounding box rectangle and label on the image
             color = [int(c) for c in COLORS[classIDs[i]]]
-            print('color debugging', color)
-            print('c', c)
             cv2.rectangle(image, (x, y), (x + w, y + h), color, 2)
             text = "{}: {:.4f}".format(LABELS[classIDs[i]], confidences[i])
-            print(boxes)
-            print(classIDs)
+            #print(boxes)
+            #print(classIDs)
             cv2.putText(image, text, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX,0.5, color, 2)
-    return image,LABELS[classIDs[i]]
+            #print('HEREE', confidences[i], LABELS[classIDs[i]])
+            
+        return image, confidences[i], LABELS[classIDs[i]]
+    else:
+        return False
+    
+def main(image):
+    # load our input image and grab its spatial dimensions
+    #img = cv2.imread(image_path_file)
+    labelsPath='/home/aida/darknet/data/obj.names'
+    Lables=get_labels(labelsPath)
+    CFG="/home/aida/darknet/cfg/yolo-obj.cfg"
+    Weights="/home/aida/darknet/backup/yolo-obj_best.weights"
+    nets=load_model(CFG,Weights)
+    Colors=get_colors(Lables)
+    temp=get_predection(image, nets, Lables, Colors)
+    if temp:
+        res, confidence, prediction = temp
+        print('mainfile',prediction, confidence)
+        # image=cv2.cvtColor(image,cv2.COLOR_BGR2RGB)
+        # show the output image
+        cv2.imshow("Image", res)
+        #cv2.waitKey()
+        cv2.destroyAllWindows()
+        return confidence, prediction, res
+        
+#preds, conf, img  = main('/home/aida/cropped.jpg')
 
-labelsPath="yolo-aida/obj.names"
-cfgpath="yolo-aida/yolov3-tiny_obj.cfg"
-wpath="yolo-aida/yolov3-tiny-obj_final.weights"
-Lables=get_labels(labelsPath)
-CFG=get_config(cfgpath)
-Weights=get_weights(wpath)
-nets=load_model(CFG,Weights)
-Colors=get_colors(Lables)
-# Initialize the Flask application
 app = Flask(__name__)
 
+
 # route http posts to this method
-@app.route('/api/test', methods=['GET','POST'])
-def main():
+@app.route('/api/test', methods=['POST'])
+
+
+def test():
     r = request
     # convert string of image data to uint8
     nparr = np.fromstring(r.data, np.uint8)
     # decode image
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    #cv2.imwrite save the decoded image, to be able to run it through the inference code
-    #call detect.py on the decoded image
-    inference_image, predictions = get_predection(img,nets,Lables,Colors)
+
+
+    # do some fancy processing here....
+    confidence, predictions, inference_image = main(img)
     cv2.imshow("Image", inference_image)
     cv2.waitKey()
-    print('HELLO BOTCH',predictions)
-    
-    # do some fancy processing here....
 
     # build a response dict to send back to client
-    response = {'message': 'Prediction result: {}'.format(predictions)
+    response = {'message': 'yolo completed, prediction returned. PREDICTION IS {}, CONFIDENCE IS {}'.format(predictions, confidence)
                 }
-    
     # encode response using jsonpickle
     response_pickled = jsonpickle.encode(response)
 
     return Response(response=response_pickled, status=200, mimetype="application/json")
 
-    # start flask app
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+
+# start flask app
+app.run(host="0.0.0.0", port=5000)
+
+
